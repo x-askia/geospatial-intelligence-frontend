@@ -176,49 +176,57 @@ function renderDetails(constructionRecord) {
       })
     : [];
 
-  const candidateHtml = relationships.length
+const candidateHtml = relationships.length
     ? relationships.map(rel => {
         const camera = cameraLookup.get(rel.targetId);
+        const title = camera?.title || rel.targetId;
+        const locationText =
+          camera?.meta?.locationName ||
+          camera?.meta?.location ||
+          camera?.description ||
+          "";
+
+        const imageUrl =
+          camera?.meta?.imageUrl ||
+          camera?.meta?.screenshotAddress ||
+          camera?.imageUrl ||
+          "";
+
+        const streamUrl =
+          camera?.meta?.streamUrl ||
+          camera?.streamUrl ||
+          "";
+
+        const sourceUrl =
+          camera?.sourceUrl || "";
+
+        const previewHtml = imageUrl
+          ? `<img class="camera-preview" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(title)} preview" />`
+          : `<div class="camera-preview-empty">No preview available</div>`;
+
+        const linkHtml = streamUrl
+          ? `<a class="camera-link" href="${escapeHtml(streamUrl)}" target="_blank" rel="noopener noreferrer">Open stream</a>`
+          : sourceUrl
+            ? `<a class="camera-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Open source</a>`
+            : `<span class="camera-link-disabled">No live link</span>`;
+
         return `
           <div class="camera-card">
-            <div><strong>${escapeHtml(camera?.title || rel.targetId)}</strong></div>
-            <div>${escapeHtml(camera?.meta?.locationName || camera?.description || "")}</div>
+            <div><strong>${escapeHtml(title)}</strong></div>
+            <div>${escapeHtml(locationText)}</div>
             <div class="distance">
-              ${rel.confidence} · ${rel.distanceMeters ?? "?"}m
+              ${escapeHtml(rel.confidence || "candidate")} · ${rel.distanceMeters ?? "?"}m
+            </div>
+            <div class="camera-preview-wrap">
+              ${previewHtml}
+            </div>
+            <div class="camera-actions">
+              ${linkHtml}
             </div>
           </div>
         `;
       }).join("")
     : `<div class="detail-meta">No candidate cameras attached.</div>`;
-
-  detailsContent.innerHTML = `
-    <h2 class="detail-title">${escapeHtml(constructionRecord.title)}</h2>
-    <div class="detail-meta">
-      ${escapeHtml(constructionRecord.market)} · ${escapeHtml(constructionRecord.status || "unknown")}
-    </div>
-
-    <div class="detail-block">
-      <h3>Description</h3>
-      <div class="detail-pre">${escapeHtml(constructionRecord.description || "")}</div>
-    </div>
-
-    <div class="detail-block">
-      <h3>Dates</h3>
-      <div class="detail-pre">Start: ${escapeHtml(constructionRecord.startTime || "N/A")}
-End: ${escapeHtml(constructionRecord.endTime || "N/A")}</div>
-    </div>
-
-    <div class="detail-block">
-      <h3>Candidate Cameras</h3>
-      ${candidateHtml}
-    </div>
-
-    <div class="detail-block">
-      <h3>Raw Meta</h3>
-      <div class="detail-pre">${escapeHtml(JSON.stringify(constructionRecord.meta || {}, null, 2))}</div>
-    </div>
-  `;
-}
 
 function escapeHtml(value) {
   return String(value)
