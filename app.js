@@ -1,5 +1,5 @@
 const API_URL =
-  "https://script.google.com/a/macros/zoox.com/s/AKfycbz1d6eLKUXzvCBLyiDJf6xgtC20X8eOad8WqeKDfxprKHk8fcAVbrz8HqA3NSnk1pp0/exec?format=json";
+  "./payload.json";
 
 const state = {
   payload: null,
