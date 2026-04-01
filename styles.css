@@ -199,3 +199,48 @@ body {
     display: none;
   }
 }
+
+.camera-preview-wrap {
+  margin-top: 10px;
+}
+
+.camera-preview {
+  width: 100%;
+  max-height: 180px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #1f2937;
+  display: block;
+}
+
+.camera-preview-empty {
+  border: 1px dashed #374151;
+  border-radius: 8px;
+  padding: 18px 10px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.camera-actions {
+  margin-top: 10px;
+}
+
+.camera-link {
+  display: inline-block;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #1d4ed8;
+  color: white;
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.camera-link:hover {
+  background: #2563eb;
+}
+
+.camera-link-disabled {
+  color: #94a3b8;
+  font-size: 13px;
+}
