@@ -269,6 +269,22 @@ function renderCounts() {
   }
 }
 
+function renderCollapsibleMeta(title, obj, sectionId) {
+  const pretty = escapeHtml(JSON.stringify(obj || {}, null, 2));
+
+  return `
+    <div class="detail-block collapsible-block">
+      <button class="collapse-toggle" data-target="${sectionId}">
+        <span class="caret"></span>
+        <span>${escapeHtml(title)}</span>
+      </button>
+      <div id="${sectionId}" class="collapse-content hidden">
+        <div class="detail-pre">${pretty}</div>
+      </div>
+    </div>
+  `;
+}
+
 function renderCameraCard(camera, distanceMeters, confidence, isSuggested) {
   const title = camera?.title || camera?.id || "Unknown Camera";
   const locationText = camera?.meta?.locationName || camera?.meta?.primaryStreet || camera?.description || "";
@@ -280,10 +296,6 @@ function renderCameraCard(camera, distanceMeters, confidence, isSuggested) {
     ? `<img class="camera-preview" src="${imageUrl}" alt="${escapeHtml(title)} preview" />`
     : `<div class="camera-preview-empty">${isAustin ? "Austin preview requires auth or is unavailable." : "No preview available."}</div>`;
 
-  const actionHtml = streamUrl
-    ? `<a class="camera-link" href="${streamUrl}" target="_blank" rel="noopener noreferrer">Open stream</a>`
-    : `<span class="camera-link-disabled">${isAustin ? "Still frame only" : "No live link"}</span>`;
-
   return `
     <div class="camera-card">
       <div><strong>${escapeHtml(title)}</strong></div>
@@ -292,7 +304,14 @@ function renderCameraCard(camera, distanceMeters, confidence, isSuggested) {
       <div class="camera-preview-wrap">${previewHtml}</div>
       <div class="camera-actions">
         <button class="camera-select-button" data-camera-id="${escapeHtml(camera.id)}">Focus camera</button>
-        ${actionHtml}
+        ${imageUrl
+          ? `<a class="camera-link" href="${imageUrl}" target="_blank" rel="noopener noreferrer">Open still frame</a>`
+          : ``
+        }
+        ${streamUrl
+          ? `<a class="camera-link" href="${streamUrl}" target="_blank" rel="noopener noreferrer">Open stream</a>`
+          : `<span class="camera-link-disabled">${isAustin ? "Still frame only" : "No live link"}</span>`
+        }
       </div>
     </div>
   `;
@@ -307,7 +326,7 @@ function renderFocusedCamera(camera) {
     <div class="camera-card focused-camera">
       <div><strong>${escapeHtml(camera.title || camera.id)}</strong></div>
       <div class="camera-location">${escapeHtml(camera.description || "")}</div>
-      <div class="detail-pre">${escapeHtml(JSON.stringify(camera.meta || {}, null, 2))}</div>
+      ${renderCollapsibleMeta("Camera Metadata", camera.meta || {}, `camera-meta-${camera.id}`)}
       <div class="camera-preview-wrap">
         ${imageUrl
           ? `<img class="camera-preview" src="${imageUrl}" alt="${escapeHtml(camera.title || camera.id)} preview" />`
@@ -315,6 +334,10 @@ function renderFocusedCamera(camera) {
         }
       </div>
       <div class="camera-actions">
+        ${imageUrl
+          ? `<a class="camera-link" href="${imageUrl}" target="_blank" rel="noopener noreferrer">Open still frame</a>`
+          : ``
+        }
         ${streamUrl
           ? `<a class="camera-link" href="${streamUrl}" target="_blank" rel="noopener noreferrer">Open stream</a>`
           : `<span class="camera-link-disabled">${isAustin ? "Still frame only" : "No live link"}</span>`
@@ -393,10 +416,7 @@ System: ${escapeHtml(constructionRecord.sourceSystem || "N/A")}
 ID: ${escapeHtml(constructionRecord.sourceRecordId || "N/A")}</div>
     </div>
 
-    <div class="detail-block">
-      <h3>Raw Meta</h3>
-      <div class="detail-pre">${escapeHtml(JSON.stringify(constructionRecord.meta || {}, null, 2))}</div>
-    </div>
+    ${renderCollapsibleMeta("Construction Metadata", constructionRecord.meta || {}, `construction-meta-${constructionRecord.id}`)}
 
     ${analystNotesHtml}
     ${selectedCameraHtml}
@@ -422,6 +442,20 @@ ID: ${escapeHtml(constructionRecord.sourceRecordId || "N/A")}</div>
       if (camera) {
         selectCamera(camera);
       }
+    });
+  });
+
+  // Bind click events for the collapsible meta blocks
+  detailsContent.querySelectorAll(".collapse-toggle").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const targetId = btn.getAttribute("data-target");
+      const target = document.getElementById(targetId);
+      const caret = btn.querySelector(".caret");
+
+      if (!target) return;
+
+      target.classList.toggle("hidden");
+      caret.textContent = target.classList.contains("hidden") ? "" : "▼";
     });
   });
 }
