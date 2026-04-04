@@ -365,8 +365,14 @@ function renderDetails() {
   detailsEmpty.classList.add("hidden");
   detailsContent.classList.remove("hidden");
 
-  const suggested = getSuggestedCameraRecords(constructionRecord);
-  const nearby = getOtherNearbyCameraRecords(constructionRecord, 250);
+  // THE FIX: Filter the actively selected camera out of the suggestion/nearby pools
+  const selectedCameraId = selectedCamera ? selectedCamera.id : null;
+
+  const suggested = getSuggestedCameraRecords(constructionRecord)
+    .filter(item => item.camera && item.camera.id !== selectedCameraId);
+
+  const nearby = getOtherNearbyCameraRecords(constructionRecord, 250)
+    .filter(item => item.camera && item.camera.id !== selectedCameraId);
 
   const suggestedHtml = suggested.length
     ? suggested.map(({ relationship, camera }) => renderCameraCard(camera, relationship.distanceMeters, relationship.confidence, true)).join("")
