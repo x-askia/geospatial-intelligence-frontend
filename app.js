@@ -5,12 +5,16 @@ const state = {
   selectedMarket: "all",
   showConstruction: true,
   showCameras: true,
+  selectedConstructionId: null,
+  selectedCameraId: null,
   map: null,
   constructionLayer: null,
   cameraLayer: null,
 };
 
-// 1. Move escapeHtml to the top so it's globally available
+/**
+ * UTILITIES
+ */
 function escapeHtml(value) {
   if (value == null) return "";
   return String(value)
@@ -21,6 +25,131 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function metersBetweenFrontend(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const toRad = deg => (deg * Math.PI) / 180;
+
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+/**
+ * DATA HELPERS
+ */
+function getSelectedConstruction() {
+  if (!state.payload || !state.selectedConstructionId) return null;
+  return (state.payload.records || []).find(
+    r => r.layerType === "construction" && r.id === state.selectedConstructionId
+  ) || null;
+}
+
+function getSelectedCamera() {
+  if (!state.payload || !state.selectedCameraId) return null;
+  return (state.payload.records || []).find(
+    r => r.layerType === "cameras" && r.id === state.selectedCameraId
+  ) || null;
+}
+
+function getCameraLookup() {
+  return new Map(
+    (state.payload?.records || [])
+      .filter(r => r.layerType === "cameras")
+      .map(r => [r.id, r])
+  );
+}
+
+function getFilteredRecords() {
+  const records = state.payload.records || [];
+
+  return records.filter((record) => {
+    if (state.selectedMarket !== "all" && record.market !== state.selectedMarket) return false;
+    if (record.layerType === "construction" && !state.showConstruction) return false;
+    if (record.layerType === "cameras" && !state.showCameras) return false;
+    return true;
+  });
+}
+
+function getConstructionAnchor(record) {
+  if (Number.isFinite(record?.lat) && Number.isFinite(record?.lng)) {
+    return { lat: record.lat, lng: record.lng };
+  }
+
+  const geometry = Array.isArray(record?.geometry) ? record.geometry : [];
+  if (geometry.length > 0 && Array.isArray(geometry[0]) && geometry[0].length >= 2) {
+    return { lat: Number(geometry[0][1]), lng: Number(geometry[0][0]) };
+  }
+
+  return null;
+}
+
+function getSuggestedCameraRecords(constructionRecord) {
+  const cameraLookup = getCameraLookup();
+  const relationships = Array.isArray(constructionRecord?.relationships)
+    ? [...constructionRecord.relationships]
+        .filter(rel => rel.targetLayer === "cameras")
+        .sort((a, b) => (a.distanceMeters ?? 999999) - (b.distanceMeters ?? 999999))
+    : [];
+
+  return relationships.map(rel => ({
+    relationship: rel,
+    camera: cameraLookup.get(rel.targetId)
+  })).filter(item => item.camera);
+}
+
+function getOtherNearbyCameraRecords(constructionRecord, radiusMeters = 250) {
+  if (!state.payload || !constructionRecord) return [];
+
+  const anchor = getConstructionAnchor(constructionRecord);
+  if (!anchor) return [];
+
+  const suggestedIds = new Set(
+    (constructionRecord.relationships || [])
+      .filter(rel => rel.targetLayer === "cameras")
+      .map(rel => rel.targetId)
+  );
+
+  return (state.payload.records || [])
+    .filter(r => r.layerType === "cameras")
+    .filter(r => r.market === constructionRecord.market)
+    .filter(r => !suggestedIds.has(r.id))
+    .filter(r => Number.isFinite(r.lat) && Number.isFinite(r.lng))
+    .map(camera => ({
+      camera,
+      distanceMeters: Math.round(
+        metersBetweenFrontend(anchor.lat, anchor.lng, camera.lat, camera.lng)
+      )
+    }))
+    .filter(item => item.distanceMeters <= radiusMeters)
+    .sort((a, b) => a.distanceMeters - b.distanceMeters);
+}
+
+/**
+ * INTERACTION HANDLERS
+ */
+function selectConstruction(record) {
+  state.selectedConstructionId = record.id;
+  state.selectedCameraId = null;
+  renderDetails();
+}
+
+function selectCamera(record) {
+  state.selectedCameraId = record.id;
+  renderDetails();
+}
+
+/**
+ * MAP INITIALIZATION & RENDERING
+ */
 function initMap() {
   state.map = L.map("map").setView([36.1699, -115.1398], 11);
 
@@ -33,26 +162,80 @@ function initMap() {
   state.cameraLayer = L.layerGroup().addTo(state.map);
 }
 
-async function loadPayload() {
-  const response = await fetch(API_URL);
-  if (!response.ok) {
-    throw new Error(`Fetch failed: ${response.status}`);
+function renderMap() {
+  state.constructionLayer.clearLayers();
+  state.cameraLayer.clearLayers();
+
+  const records = getFilteredRecords();
+  const constructionRecords = records.filter(r => r.layerType === "construction");
+  const cameraRecords = records.filter(r => r.layerType === "cameras");
+
+  const bounds = [];
+
+  // Render Construction
+  constructionRecords.forEach((record) => {
+    const geometry = Array.isArray(record.geometry) ? record.geometry : [];
+    const latlngs = geometry
+      .filter(pair => Array.isArray(pair) && pair.length >= 2)
+      .map(pair => [pair[1], pair[0]]);
+
+    if (latlngs.length > 1) {
+      const polyline = L.polyline(latlngs, {
+        color: "#ef4444",
+        weight: 4,
+      });
+
+      polyline.on("click", () => selectConstruction(record));
+      polyline.bindPopup(`<strong>${escapeHtml(record.title)}</strong>`);
+      polyline.addTo(state.constructionLayer);
+
+      latlngs.forEach(p => bounds.push(p));
+    } else if (Number.isFinite(record.lat) && Number.isFinite(record.lng)) {
+      const marker = L.circleMarker([record.lat, record.lng], {
+        radius: 7,
+        color: "#ef4444",
+        fillColor: "#ef4444",
+        fillOpacity: 0.9,
+      });
+
+      marker.on("click", () => selectConstruction(record));
+      marker.bindPopup(`<strong>${escapeHtml(record.title)}</strong>`);
+      marker.addTo(state.constructionLayer);
+
+      bounds.push([record.lat, record.lng]);
+    }
+  });
+
+  // Render Cameras
+  cameraRecords.forEach((record) => {
+    if (!Number.isFinite(record.lat) || !Number.isFinite(record.lng)) return;
+
+    const marker = L.circleMarker([record.lat, record.lng], {
+      radius: 5,
+      color: "#3b82f6",
+      fillColor: "#3b82f6",
+      fillOpacity: 0.9,
+    });
+
+    marker.on("click", () => selectCamera(record));
+    marker.bindPopup(`<strong>${escapeHtml(record.title)}</strong>`);
+    marker.addTo(state.cameraLayer);
+    bounds.push([record.lat, record.lng]);
+  });
+
+  if (bounds.length > 0) {
+    state.map.fitBounds(bounds, { padding: [30, 30] });
   }
-
-  const payload = await response.json();
-  state.payload = payload;
-
-  renderMeta();
-  renderMarketOptions();
-  renderCounts();
-  renderMap();
 }
 
+/**
+ * UI RENDERING
+ */
 function renderMeta() {
-  document.getElementById("service-status").textContent =
-    `Status: ${state.payload.serviceStatus}`;
-  document.getElementById("generated-at").textContent =
-    `Generated: ${state.payload.generatedAt}`;
+  const statusEl = document.getElementById("service-status");
+  const genAtEl = document.getElementById("generated-at");
+  if (statusEl) statusEl.textContent = `Status: ${state.payload.serviceStatus}`;
+  if (genAtEl) genAtEl.textContent = `Generated: ${state.payload.generatedAt}`;
 }
 
 function renderMarketOptions() {
@@ -71,26 +254,6 @@ function renderMarketOptions() {
   select.value = state.selectedMarket;
 }
 
-function getFilteredRecords() {
-  const records = state.payload.records || [];
-
-  return records.filter((record) => {
-    if (state.selectedMarket !== "all" && record.market !== state.selectedMarket) {
-      return false;
-    }
-
-    if (record.layerType === "construction" && !state.showConstruction) {
-      return false;
-    }
-
-    if (record.layerType === "cameras" && !state.showCameras) {
-      return false;
-    }
-
-    return true;
-  });
-}
-
 function renderCounts() {
   const records = getFilteredRecords();
   const constructionCount = records.filter(r => r.layerType === "construction").length;
@@ -106,150 +269,161 @@ function renderCounts() {
   }
 }
 
-function renderMap() {
-  state.constructionLayer.clearLayers();
-  state.cameraLayer.clearLayers();
+function renderCameraCard(camera, distanceMeters, confidence, isSuggested) {
+  const title = camera?.title || camera?.id || "Unknown Camera";
+  const locationText = camera?.meta?.locationName || camera?.meta?.primaryStreet || camera?.description || "";
+  const imageUrl = camera?.meta?.imageUrl || camera?.meta?.screenshotAddress || camera?.imageUrl || "";
+  const streamUrl = camera?.meta?.streamUrl || camera?.streamUrl || "";
+  const isAustin = camera?.market === "austin";
 
-  const records = getFilteredRecords();
-  const constructionRecords = records.filter(r => r.layerType === "construction");
-  const cameraRecords = records.filter(r => r.layerType === "cameras");
+  const previewHtml = imageUrl
+    ? `<img class="camera-preview" src="${imageUrl}" alt="${escapeHtml(title)} preview" />`
+    : `<div class="camera-preview-empty">${isAustin ? "Austin preview requires auth or is unavailable." : "No preview available."}</div>`;
 
-  const bounds = [];
+  const actionHtml = streamUrl
+    ? `<a class="camera-link" href="${streamUrl}" target="_blank" rel="noopener noreferrer">Open stream</a>`
+    : `<span class="camera-link-disabled">${isAustin ? "Still frame only" : "No live link"}</span>`;
 
-  constructionRecords.forEach((record) => {
-    const geometry = Array.isArray(record.geometry) ? record.geometry : [];
-    const latlngs = geometry
-      .filter(pair => Array.isArray(pair) && pair.length >= 2)
-      .map(pair => [pair[1], pair[0]]);
-
-    if (latlngs.length > 1) {
-      const polyline = L.polyline(latlngs, {
-        color: "#ef4444",
-        weight: 4,
-      });
-
-      polyline.on("click", () => renderDetails(record));
-      polyline.bindPopup(`<strong>${escapeHtml(record.title)}</strong>`);
-      polyline.addTo(state.constructionLayer);
-
-      latlngs.forEach(p => bounds.push(p));
-    } else if (Number.isFinite(record.lat) && Number.isFinite(record.lng)) {
-      const marker = L.circleMarker([record.lat, record.lng], {
-        radius: 7,
-        color: "#ef4444",
-        fillColor: "#ef4444",
-        fillOpacity: 0.9,
-      });
-
-      marker.on("click", () => renderDetails(record));
-      marker.bindPopup(`<strong>${escapeHtml(record.title)}</strong>`);
-      marker.addTo(state.constructionLayer);
-
-      bounds.push([record.lat, record.lng]);
-    }
-  });
-
-  cameraRecords.forEach((record) => {
-    if (!Number.isFinite(record.lat) || !Number.isFinite(record.lng)) return;
-
-    const marker = L.circleMarker([record.lat, record.lng], {
-      radius: 5,
-      color: "#3b82f6",
-      fillColor: "#3b82f6",
-      fillOpacity: 0.9,
-    });
-
-    marker.bindPopup(`<strong>${escapeHtml(record.title)}</strong>`);
-    marker.addTo(state.cameraLayer);
-
-    bounds.push([record.lat, record.lng]);
-  });
-
-  if (bounds.length > 0) {
-    state.map.fitBounds(bounds, { padding: [30, 30] });
-  }
+  return `
+    <div class="camera-card">
+      <div><strong>${escapeHtml(title)}</strong></div>
+      <div class="camera-location">${escapeHtml(locationText)}</div>
+      <div class="distance">${escapeHtml(String(confidence))} · ${distanceMeters ?? "?"}m ${isSuggested ? "· suggested" : "· nearby"}</div>
+      <div class="camera-preview-wrap">${previewHtml}</div>
+      <div class="camera-actions">
+        <button class="camera-select-button" data-camera-id="${escapeHtml(camera.id)}">Focus camera</button>
+        ${actionHtml}
+      </div>
+    </div>
+  `;
 }
 
-function renderDetails(constructionRecord) {
+function renderFocusedCamera(camera) {
+  const imageUrl = camera?.meta?.imageUrl || camera?.meta?.screenshotAddress || camera?.imageUrl || "";
+  const streamUrl = camera?.meta?.streamUrl || camera?.streamUrl || "";
+  const isAustin = camera?.market === "austin";
+
+  return `
+    <div class="camera-card focused-camera">
+      <div><strong>${escapeHtml(camera.title || camera.id)}</strong></div>
+      <div class="camera-location">${escapeHtml(camera.description || "")}</div>
+      <div class="detail-pre">${escapeHtml(JSON.stringify(camera.meta || {}, null, 2))}</div>
+      <div class="camera-preview-wrap">
+        ${imageUrl
+          ? `<img class="camera-preview" src="${imageUrl}" alt="${escapeHtml(camera.title || camera.id)} preview" />`
+          : `<div class="camera-preview-empty">${isAustin ? "Austin preview requires auth or is unavailable." : "No preview available."}</div>`
+        }
+      </div>
+      <div class="camera-actions">
+        ${streamUrl
+          ? `<a class="camera-link" href="${streamUrl}" target="_blank" rel="noopener noreferrer">Open stream</a>`
+          : `<span class="camera-link-disabled">${isAustin ? "Still frame only" : "No live link"}</span>`
+        }
+      </div>
+    </div>
+  `;
+}
+
+function renderDetails() {
   const detailsEmpty = document.getElementById("details-empty");
   const detailsContent = document.getElementById("details-content");
-
   if (!detailsEmpty || !detailsContent) return;
+
+  const constructionRecord = getSelectedConstruction();
+  const selectedCamera = getSelectedCamera();
+
+  if (!constructionRecord) {
+    detailsEmpty.classList.remove("hidden");
+    detailsContent.classList.add("hidden");
+    detailsContent.innerHTML = "";
+    return;
+  }
 
   detailsEmpty.classList.add("hidden");
   detailsContent.classList.remove("hidden");
 
-  const cameraLookup = new Map(
-    (state.payload.records || [])
-      .filter(r => r.layerType === "cameras")
-      .map(r => [r.id, r])
-  );
+  const suggested = getSuggestedCameraRecords(constructionRecord);
+  const nearby = getOtherNearbyCameraRecords(constructionRecord, 250);
 
-  const relationships = Array.isArray(constructionRecord.relationships)
-    ? [...constructionRecord.relationships].sort((a, b) => {
-        const da = Number.isFinite(a.distanceMeters) ? a.distanceMeters : 999999;
-        const db = Number.isFinite(b.distanceMeters) ? b.distanceMeters : 999999;
-        return da - db;
-      })
-    : [];
+  const suggestedHtml = suggested.length
+    ? suggested.map(({ relationship, camera }) => renderCameraCard(camera, relationship.distanceMeters, relationship.confidence, true)).join("")
+    : `<div class="detail-meta">No suggested cameras attached.</div>`;
 
-  const candidateHtml = relationships.length
-    ? relationships.map(rel => {
-        const camera = cameraLookup.get(rel.targetId);
-        const title = camera?.title || rel.targetId;
-        const locationText =
-          camera?.meta?.locationName ||
-          camera?.meta?.location ||
-          camera?.description ||
-          "";
+  const nearbyHtml = nearby.length
+    ? nearby.map(({ camera, distanceMeters }) => renderCameraCard(camera, distanceMeters, "nearby", false)).join("")
+    : `<div class="detail-meta">No additional nearby cameras found.</div>`;
 
-        const imageUrl =
-          camera?.meta?.imageUrl ||
-          camera?.meta?.screenshotAddress ||
-          camera?.imageUrl ||
-          "";
+  const selectedCameraHtml = selectedCamera
+    ? `
+      <div class="detail-block">
+        <h3>Selected Camera</h3>
+        ${renderFocusedCamera(selectedCamera)}
+      </div>
+    `
+    : "";
 
-        const streamUrl =
-          camera?.meta?.streamUrl ||
-          camera?.streamUrl ||
-          "";
-
-        const sourceUrl =
-          camera?.sourceUrl || "";
-
-        const previewHtml = imageUrl
-          ? `<img class="camera-preview" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(title)} preview" />`
-          : `<div class="camera-preview-empty">No preview available</div>`;
-
-        const linkHtml = streamUrl
-          ? `<a class="camera-link" href="${escapeHtml(streamUrl)}" target="_blank" rel="noopener noreferrer">Open stream</a>`
-          : sourceUrl
-            ? `<a class="camera-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Open source</a>`
-            : `<span class="camera-link-disabled">No live link</span>`;
-
-        return `
-          <div class="camera-card">
-            <div><strong>${escapeHtml(title)}</strong></div>
-            <div>${escapeHtml(locationText)}</div>
-            <div class="distance">
-              ${escapeHtml(rel.confidence || "candidate")} · ${rel.distanceMeters ?? "?"}m
-            </div>
-            <div class="camera-preview-wrap">
-              ${previewHtml}
-            </div>
-            <div class="camera-actions">
-              ${linkHtml}
-            </div>
-          </div>
-        `;
-      }).join("")
-    : `<div class="detail-meta">No candidate cameras attached.</div>`;
-
-  // 2. Actually inject the HTML into the DOM and close the function properly
-  detailsContent.innerHTML = `
-    <h3>${escapeHtml(constructionRecord.title)}</h3>
-    ${candidateHtml}
+  const analystNotesHtml = `
+    <div class="detail-block">
+      <h3>Analyst Notes</h3>
+      <div class="detail-pre">Deferred for now until a real public write backend exists.</div>
+    </div>
   `;
+
+  detailsContent.innerHTML = `
+    <h2 class="detail-title">${escapeHtml(constructionRecord.title)}</h2>
+    <div class="detail-meta">
+      ${escapeHtml(constructionRecord.market)} · ${escapeHtml(constructionRecord.status || "unknown")}
+    </div>
+
+    <div class="detail-block">
+      <h3>Dates</h3>
+      <div class="detail-pre">Start: ${escapeHtml(constructionRecord.startTime || "N/A")}
+End: ${escapeHtml(constructionRecord.endTime || "N/A")}</div>
+    </div>
+
+    <div class="detail-block">
+      <h3>Description</h3>
+      <div class="detail-pre">${escapeHtml(constructionRecord.description || "")}</div>
+    </div>
+
+    <div class="detail-block">
+      <h3>Source / Metadata</h3>
+      <div class="detail-pre">Source: ${escapeHtml(constructionRecord.sourceName || "N/A")}
+System: ${escapeHtml(constructionRecord.sourceSystem || "N/A")}
+ID: ${escapeHtml(constructionRecord.sourceRecordId || "N/A")}</div>
+    </div>
+
+    <div class="detail-block">
+      <h3>Raw Meta</h3>
+      <div class="detail-pre">${escapeHtml(JSON.stringify(constructionRecord.meta || {}, null, 2))}</div>
+    </div>
+
+    ${analystNotesHtml}
+    ${selectedCameraHtml}
+
+    <div class="detail-block">
+      <h3>Suggested Cameras</h3>
+      ${suggestedHtml}
+    </div>
+
+    <div class="detail-block">
+      <h3>Other Nearby Cameras</h3>
+      ${nearbyHtml}
+    </div>
+  `;
+
+  // Bind click events for the newly injected camera buttons
+  detailsContent.querySelectorAll(".camera-select-button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const cameraId = btn.getAttribute("data-camera-id");
+      const camera = (state.payload.records || []).find(
+        r => r.layerType === "cameras" && r.id === cameraId
+      );
+      if (camera) {
+        selectCamera(camera);
+      }
+    });
+  });
 }
 
 function bindUi() {
@@ -279,6 +453,24 @@ function bindUi() {
       renderMap();
     });
   }
+}
+
+/**
+ * BOOTSTRAP
+ */
+async function loadPayload() {
+  const response = await fetch(API_URL);
+  if (!response.ok) {
+    throw new Error(`Fetch failed: ${response.status}`);
+  }
+
+  const payload = await response.json();
+  state.payload = payload;
+
+  renderMeta();
+  renderMarketOptions();
+  renderCounts();
+  renderMap();
 }
 
 async function bootstrap() {
