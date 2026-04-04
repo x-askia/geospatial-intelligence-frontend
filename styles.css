@@ -270,3 +270,37 @@ body {
 .focused-camera {
   border-color: #3b82f6;
 }
+
+
+.collapsible-block {
+  margin-top: 10px;
+}
+
+.collapse-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #111827;
+  color: #e5e7eb;
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+}
+
+.collapse-toggle:hover {
+  background: #1f2937;
+}
+
+.caret {
+  display: inline-block;
+  width: 14px;
+  color: #93c5fd;
+}
+
+.collapse-content {
+  margin-top: 8px;
+}
