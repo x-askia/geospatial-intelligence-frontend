@@ -365,7 +365,6 @@ function renderDetails() {
   detailsEmpty.classList.add("hidden");
   detailsContent.classList.remove("hidden");
 
-  // THE FIX: Filter the actively selected camera out of the suggestion/nearby pools
   const selectedCameraId = selectedCamera ? selectedCamera.id : null;
 
   const suggested = getSuggestedCameraRecords(constructionRecord)
@@ -415,14 +414,18 @@ End: ${escapeHtml(constructionRecord.endTime || "N/A")}</div>
       <div class="detail-pre">${escapeHtml(constructionRecord.description || "")}</div>
     </div>
 
-    <div class="detail-block">
-      <h3>Source / Metadata</h3>
-      <div class="detail-pre">Source: ${escapeHtml(constructionRecord.sourceName || "N/A")}
-System: ${escapeHtml(constructionRecord.sourceSystem || "N/A")}
-ID: ${escapeHtml(constructionRecord.sourceRecordId || "N/A")}</div>
-    </div>
+    ${renderCollapsibleMeta(
+      "Source / Metadata",
+      {
+        sourceName: constructionRecord.sourceName || "N/A",
+        sourceSystem: constructionRecord.sourceSystem || "N/A",
+        sourceUrl: constructionRecord.sourceUrl || "N/A",
+        sourceRecordId: constructionRecord.sourceRecordId || "N/A"
+      },
+      `construction-source-${constructionRecord.id}`
+    )}
 
-    ${renderCollapsibleMeta("Construction Metadata", constructionRecord.meta || {}, `construction-meta-${constructionRecord.id}`)}
+    ${renderCollapsibleMeta("Construction Details Metadata", constructionRecord.meta || {}, `construction-meta-${constructionRecord.id}`)}
 
     ${analystNotesHtml}
     ${selectedCameraHtml}
