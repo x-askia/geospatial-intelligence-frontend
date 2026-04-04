@@ -244,3 +244,29 @@ body {
   color: #94a3b8;
   font-size: 13px;
 }
+
+.camera-location {
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.35;
+  margin-bottom: 6px;
+}
+
+.camera-select-button {
+  display: inline-block;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid #374151;
+  background: #111827;
+  color: #e5e7eb;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.camera-select-button:hover {
+  background: #1f2937;
+}
+
+.focused-camera {
+  border-color: #3b82f6;
+}
