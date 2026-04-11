@@ -502,18 +502,22 @@ function bindUi() {
  * BOOTSTRAP
  */
 async function loadPayload() {
-  const response = await fetch(API_URL);
-  if (!response.ok) {
-    throw new Error(`Fetch failed: ${response.status}`);
-  }
+  const separator = API_URL.includes("?") ? "&" : "?";
+  const response = await fetch(`${API_URL}${separator}t=${Date.now()}`, {
+    cache: "no-store"
+  });
 
-  const payload = await response.json();
-  state.payload = payload;
+  if (!response.ok) {
+    throw new Error(`Fetch failed: ${response.status}`);
+  }
 
-  renderMeta();
-  renderMarketOptions();
-  renderCounts();
-  renderMap();
+  const payload = await response.json();
+  state.payload = payload;
+
+  renderMeta();
+  renderMarketOptions();
+  renderCounts();
+  renderMap();
 }
 
 async function bootstrap() {
